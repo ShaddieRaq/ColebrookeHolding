@@ -109,6 +109,11 @@ export default {
         { value: '604800', display_name: '1 Week' },
       ],
       selectedTimeframe: '86400',
+      transformation: {
+        k: 1,  // Scale (zoom level)
+        x: 0,  // Translation in the x-axis
+        y: 0   // Translation in the y-axis
+      },
     };
   },
   mounted() {
@@ -206,21 +211,123 @@ export default {
       const maxTimeSpan = interval * maxCandles;
       const formattedStartDate = formattedFirstDate - maxTimeSpan;
 
+      console.log('Loading more data...');
+      console.log('Formatted Start Date:', formattedStartDate);
+      console.log('Formatted First Date:', formattedFirstDate);
+
       fetch(`http://localhost:3000/api/candlestick/${this.selectedPair}/${this.selectedTimeframe}?start=${formattedStartDate}&end=${formattedFirstDate}`)
-        .then(response => response.json())
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          return response.json();
+        })
         .then(data => {
+          console.log('Data fetched:', data);
+
           const parseDate = d3.timeParse('%s');
           const newData = this.parseData(data['candlestick-data'], parseDate);
+
+          // Log existing data and new data before merging
+          console.log('Existing Data:', this.data);
+          console.log('New Data:', newData);
+
           // Remove duplicates
           const uniqueNewData = newData.filter(newEntry => 
             !this.data.some(existingEntry => existingEntry.date.getTime() === newEntry.date.getTime())
           );
+
           // Merge and sort data
           this.data = [...uniqueNewData, ...this.data].sort((a, b) => a.date - b.date);
-          console.log('Updated Data:', this.data);
+
+          // Log combined data after merging
+          console.log('Combined Data:', this.data);
+
+          // Reapply transformation
           this.createChart(this.data);
-          this.recalculateAndRedrawIndicators(uniqueNewData);
+          this.reapplyTransformation();
+        })
+        .catch(error => {
+          console.error('Error loading more data:', error);
         });
+    },
+
+    reapplyTransformation() {
+      const { k, x, y, xDomain, yDomain } = this.transformation;
+
+      console.log('Reapplying transformation:', this.transformation);
+
+      try {
+        // Reapply zoom and pan transformations
+        this.svg.call(
+          d3.zoom().transform,
+          d3.zoomIdentity.translate(x, y).scale(k)
+        );
+
+        // Apply scales and redraw elements
+        this.x.domain(xDomain);
+        this.y.domain(yDomain);
+
+        this.svg.select('.x-axis').call(d3.axisBottom(this.x).tickFormat(d3.timeFormat('%Y-%m-%d %H:%M')));
+        this.svg.select('.y-axis').call(d3.axisLeft(this.y));
+
+        const candleWidth = Math.max(1, (this.width / this.data.length) * 0.6); // Adjusted width calculation for larger candles
+
+        // Log attribute values before updating elements
+        console.log('Candle Attributes Before Update:', this.svg.selectAll('rect.candle').data().map(d => ({
+          x: this.x(d.date),
+          y: this.y(Math.max(d.open, d.close)),
+          height: Math.abs(this.y(d.open) - this.y(d.close)),
+          fill: d.open > d.close ? 'red' : 'green'
+        })));
+
+        this.svg.selectAll('line.stem')
+          .attr('x1', (d) => this.x(d.date))
+          .attr('x2', (d) => this.x(d.date))
+          .attr('y1', (d) => this.y(d.low))
+          .attr('y2', (d) => this.y(d.high));
+
+        this.svg.selectAll('rect.candle')
+          .attr('x', (d) => this.x(d.date) - candleWidth / 2)
+          .attr('y', (d) => {
+            const yVal = this.y(Math.max(d.open, d.close));
+            return isNaN(yVal) ? 0 : yVal;
+          })
+          .attr('height', (d) => {
+            const heightVal = Math.abs(this.y(d.open) - this.y(d.close));
+            return isNaN(heightVal) ? 0 : heightVal;
+          })
+          .attr('fill', (d) => d.open > d.close ? 'red' : 'green');
+
+        if (this.showVolume) {
+          const volumeScale = d3.scaleLinear()
+            .domain([0, d3.max(this.data, (d) => d.volume || 0)])
+            .range([this.height, this.height - 100]);
+
+          this.svg.selectAll('rect.volume')
+            .attr('x', (d) => this.x(d.date) - candleWidth / 2)
+            .attr('y', (d) => {
+              const yVal = volumeScale(d.volume);
+              return isNaN(yVal) ? this.height : yVal;
+            })
+            .attr('height', (d) => {
+              const heightVal = this.height - volumeScale(d.volume);
+              return isNaN(heightVal) ? 0 : heightVal;
+            });
+        }
+
+        // Log attribute values after updating elements
+        console.log('Candle Attributes After Update:', this.svg.selectAll('rect.candle').data().map(d => ({
+          x: this.x(d.date),
+          y: this.y(Math.max(d.open, d.close)),
+          height: Math.abs(this.y(d.open) - this.y(d.close)),
+          fill: d.open > d.close ? 'red' : 'green'
+        })));
+
+        this.redrawIndicators();
+      } catch (error) {
+        console.error('Error reapplying transformation:', error);
+      }
     },
     recalculateAndRedrawIndicators(newData) {
       // Remove existing indicators
@@ -357,6 +464,30 @@ export default {
         const newX = transform.rescaleX(x);
         const newY = transform.rescaleY(y); // Rescale y-axis
 
+        // Update transformation object
+        this.transformation = {
+          k: transform.k,
+          x: transform.x,
+          y: transform.y,
+          xDomain: newX.domain(),
+          yDomain: newY.domain(),
+          width: width,
+          height: height,
+          viewbox: svg.attr('viewBox'),
+          lastInteraction: new Date().toISOString(),
+          zoomExtent: [1, 10],
+          panExtent: [[-Infinity, -Infinity], [Infinity, Infinity]], // Example pan extent
+          initialXDomain: x.domain(),
+          initialYDomain: y.domain(),
+          currentViewport: {
+            width: width,
+            height: height,
+            aspectRatio: width / height,
+          }
+        };
+
+        console.log('Current Transformation:', this.transformation);
+
         svg.select('.x-axis').call(d3.axisBottom(newX).tickFormat(d3.timeFormat('%Y-%m-%d %H:%M')));
         svg.select('.y-axis').call(d3.axisLeft(newY)); // Update y-axis
 
@@ -369,16 +500,11 @@ export default {
         svg.selectAll('rect.candle')
           .attr('x', (d) => newX(d.date) - candleWidth / 2)
           .attr('y', (d) => newY(Math.max(d.open, d.close)))
-          .attr('height', (d) => Math.abs(newY(d.open) - newY(d.close))); // Adjust height
+          .attr('height', (d) => Math.abs(newY(d.open) - newY(d.close)))
+          .attr('fill', (d) => d.open > d.close ? 'red' : 'green');
 
         svg.selectAll('rect.volume')
           .attr('x', (d) => newX(d.date) - candleWidth / 2);
-
-        svg.selectAll('.indicator')
-          .attr('d', d3.line()
-            .defined((d) => d.value !== null)
-            .x((d) => newX(d.date))
-            .y((d) => newY(d.value))); // Adjust y position
       };
 
       return d3.zoom()
@@ -386,8 +512,7 @@ export default {
         .translateExtent([[-Infinity, -Infinity], [Infinity, Infinity]]) // Allow infinite panning
         .extent([[0, 0], [width, height]])
         .on('zoom', zoomed);
-    }
-,
+    },
     createTooltip() {
       return d3Tip()
         .attr('class', 'd3-tip')
@@ -425,8 +550,8 @@ export default {
         .attr('y', (d) => y(Math.max(d.open, d.close)))
         .attr('width', candleWidth)
         .attr('height', (d) => Math.abs(y(d.open) - y(d.close)))
-        .attr('fill', (d) => (d.open > d.close ? 'red' : 'green'))
-        .attr('stroke', (d) => (d.open > d.close ? 'red' : 'green'));
+        .attr('fill', (d) => d.open > d.close ? 'red' : 'green')
+        .attr('stroke', (d) => d.open > d.close ? 'red' : 'green');
     },
     drawVolumes(svg, data, x, volumeScale, height, width) {
       svg.selectAll('rect.volume')
