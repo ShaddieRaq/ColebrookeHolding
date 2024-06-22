@@ -346,20 +346,26 @@ export default {
         .call(d3.axisLeft(y));
     },
     createZoom(svg, x, y, width, height, data) {
-      const candleWidth = Math.max(1, (width / data.length) * 0.8); // Adjusted width calculation
+      const candleWidth = Math.max(1, (width / data.length) * 0.6); // Adjusted width calculation for larger candles
 
       const zoomed = (event) => {
         const transform = event.transform;
         const newX = transform.rescaleX(x);
+        const newY = transform.rescaleY(y); // Rescale y-axis
 
         svg.select('.x-axis').call(d3.axisBottom(newX).tickFormat(d3.timeFormat('%Y-%m-%d %H:%M')));
+        svg.select('.y-axis').call(d3.axisLeft(newY)); // Update y-axis
 
         svg.selectAll('line.stem')
           .attr('x1', (d) => newX(d.date))
-          .attr('x2', (d) => newX(d.date));
+          .attr('x2', (d) => newX(d.date))
+          .attr('y1', (d) => newY(d.low))
+          .attr('y2', (d) => newY(d.high));
 
         svg.selectAll('rect.candle')
-          .attr('x', (d) => newX(d.date) - candleWidth / 2); // Use the adjusted width for consistency
+          .attr('x', (d) => newX(d.date) - candleWidth / 2)
+          .attr('y', (d) => newY(Math.max(d.open, d.close)))
+          .attr('height', (d) => Math.abs(newY(d.open) - newY(d.close))); // Adjust height
 
         svg.selectAll('rect.volume')
           .attr('x', (d) => newX(d.date) - candleWidth / 2);
@@ -368,7 +374,7 @@ export default {
           .attr('d', d3.line()
             .defined((d) => d.value !== null)
             .x((d) => newX(d.date))
-            .y((d) => y(d.value)));
+            .y((d) => newY(d.value))); // Adjust y position
 
         // Check if the user has panned to the left edge
         if (newX.domain()[0] <= d3.min(data, d => d.date)) {
@@ -378,10 +384,11 @@ export default {
 
       return d3.zoom()
         .scaleExtent([1, 10])
-        .translateExtent([[0, 0], [width, height]])
+        .translateExtent([[-Infinity, -Infinity], [Infinity, Infinity]]) // Allow infinite panning
         .extent([[0, 0], [width, height]])
         .on('zoom', zoomed);
-    },
+    }
+,
     createTooltip() {
       return d3Tip()
         .attr('class', 'd3-tip')
@@ -395,7 +402,7 @@ export default {
         `);
     },
     drawCandlesticks(svg, data, x, y, width, tip) {
-      const candleWidth = Math.max(1, (width / data.length) * 0.8); // Adjusted width calculation
+      const candleWidth = Math.max(1, (width / data.length) * 0.6); // Adjusted width calculation for larger candles
 
       const candlesticks = svg.selectAll('g.candlestick')
         .data(data)
