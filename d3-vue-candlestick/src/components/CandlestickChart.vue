@@ -55,6 +55,11 @@
       <div ref="chart"></div>
     </div>
 
+    <!-- Load More Data Button -->
+    <div>
+      <button @click="loadMoreData">Load More Data</button>
+    </div>
+
     <!-- Applied Indicators Management -->
     <div>
       <h3>Applied Indicators</h3>
@@ -108,7 +113,6 @@ export default {
   },
   mounted() {
     this.fetchTradingPairs();
-    this.addScrollListener();
   },
   methods: {
     fetchTradingPairs() {
@@ -375,11 +379,6 @@ export default {
             .defined((d) => d.value !== null)
             .x((d) => newX(d.date))
             .y((d) => newY(d.value))); // Adjust y position
-
-        // Check if the user has panned to the left edge
-        if (newX.domain()[0] <= d3.min(data, d => d.date)) {
-          this.loadMoreData();
-        }
       };
 
       return d3.zoom()
@@ -545,16 +544,6 @@ export default {
     toggleVolume() {
       this.createChart(this.data);
     },
-    addScrollListener() {
-      this.$refs.scrollContainer.addEventListener('scroll', this.handleScroll);
-    },
-    handleScroll() {
-      const container = this.$refs.scrollContainer;
-      const threshold = 50; // Adjust this value based on how close to the left end you want to trigger loading more data
-      if (container.scrollLeft <= threshold) {
-        this.loadMoreData();
-      }
-    }
   },
   beforeUnmount() {
     this.$refs.scrollContainer.removeEventListener('scroll', this.handleScroll);
