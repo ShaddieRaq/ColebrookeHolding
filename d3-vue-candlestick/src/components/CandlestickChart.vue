@@ -103,7 +103,7 @@ export default {
         { value: '86400', display_name: '1 Day' },
         { value: '604800', display_name: '1 Week' },
       ],
-      selectedTimeframe: '3600',
+      selectedTimeframe: '86400',
     };
   },
   mounted() {
@@ -126,6 +126,11 @@ export default {
         .then(data => {
           const parseDate = d3.timeParse('%s');
           const parsedData = this.parseData(data['candlestick-data'], parseDate);
+
+          // Clear existing chart elements
+          d3.select(this.$refs.chart).selectAll('*').remove();
+          
+          // Update chart data and re-render
           this.updateChartData(parsedData);
           this.recalculateAndRedrawIndicators(parsedData);
         });
@@ -179,9 +184,14 @@ export default {
       this.appliedIndicators.push({ name: indicatorName, period, color, timeframe, data: indicatorData });
     },
     updateChartData(newData) {
+      // Clear existing data
+      this.data = [];
+
       // Merge and sort data, removing duplicates
-      const combinedData = [...newData, ...this.data];
+      const combinedData = [...newData];
       this.data = this.removeDuplicatesAndSort(combinedData);
+
+      // Create the chart with the updated data
       this.createChart(this.data);
     },
     loadMoreData() {
@@ -233,10 +243,10 @@ export default {
         this.drawIndicator(this.data, indicator.data, indicator.name.toLowerCase(), indicator.color, indicator.period);
       });
     },
-    createLegend(svg, width) {
+    createLegend(svg) {
       const legend = svg.append('g')
         .attr('class', 'legend')
-        .attr('transform', `translate(${width - 200}, 20)`);
+        .attr('transform', `translate(10, 10)`); // Move to top-left corner
 
       legend.append('rect')
         .attr('width', 180)
@@ -296,7 +306,7 @@ export default {
       this.y = y;
       this.svg = svg;
 
-      this.createLegend(svg, width);
+      this.createLegend(svg);
       this.redrawIndicators();
     },
 
@@ -336,6 +346,8 @@ export default {
         .call(d3.axisLeft(y));
     },
     createZoom(svg, x, y, width, height, data) {
+      const candleWidth = Math.max(1, (width / data.length) * 0.8); // Adjusted width calculation
+
       const zoomed = (event) => {
         const transform = event.transform;
         const newX = transform.rescaleX(x);
@@ -347,12 +359,10 @@ export default {
           .attr('x2', (d) => newX(d.date));
 
         svg.selectAll('rect.candle')
-          .attr('x', (d) => newX(d.date) - width / data.length / 2)
-          .attr('width', width / data.length);
+          .attr('x', (d) => newX(d.date) - candleWidth / 2); // Use the adjusted width for consistency
 
         svg.selectAll('rect.volume')
-          .attr('x', (d) => newX(d.date) - width / data.length / 2)
-          .attr('width', width / data.length);
+          .attr('x', (d) => newX(d.date) - candleWidth / 2);
 
         svg.selectAll('.indicator')
           .attr('d', d3.line()
@@ -385,6 +395,8 @@ export default {
         `);
     },
     drawCandlesticks(svg, data, x, y, width, tip) {
+      const candleWidth = Math.max(1, (width / data.length) * 0.8); // Adjusted width calculation
+
       const candlesticks = svg.selectAll('g.candlestick')
         .data(data)
         .enter()
@@ -403,9 +415,9 @@ export default {
 
       candlesticks.append('rect')
         .attr('class', 'candle')
-        .attr('x', (d) => x(d.date) - width / data.length / 2)
+        .attr('x', (d) => x(d.date) - candleWidth / 2)
         .attr('y', (d) => y(Math.max(d.open, d.close)))
-        .attr('width', width / data.length)
+        .attr('width', candleWidth)
         .attr('height', (d) => Math.abs(y(d.open) - y(d.close)))
         .attr('fill', (d) => (d.open > d.close ? 'red' : 'green'))
         .attr('stroke', (d) => (d.open > d.close ? 'red' : 'green'));
